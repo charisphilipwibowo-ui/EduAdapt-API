@@ -277,6 +277,245 @@ app.delete('/api/materi/:id', (req, res) => {
         }
         res.json({ success: true, message: 'Materi berhasil dihapus!' });
     });
+});// =======================================================
+// ROUTE ANALITIK: BERBASIS TABEL `nilai`
+// =======================================================
+// Tambahkan blok ini ke file server utama (index.js / server.js)
+// setelah route '/api/materi'
+
+// ---------- ANALITIK SISWA: rekap nilai milik siswa tertentu ----------
+// GET /api/analitik/siswa/:siswa_id
+app.get('/api/analitik/siswa/:siswa_id', (req, res) => {
+    const { siswa_id } = req.params;
+
+    const queryRekap = `
+        SELECT n.id, n.jenis_ujian, n.skor, n.tanggal_kerja, mp.nama_mapel
+        FROM nilai n
+        LEFT JOIN mata_pelajaran mp ON n.mapel_id = mp.id
+        WHERE n.siswa_id = ?
+        ORDER BY n.tanggal_kerja DESC
+    `;
+
+    const querySummary = `
+        SELECT 
+            COUNT(*) AS total_ujian,
+            ROUND(AVG(skor), 2) AS rata_rata,
+            MAX(skor) AS skor_tertinggi,
+            MIN(skor) AS skor_terendah
+        FROM nilai
+        WHERE siswa_id = ?
+    `;
+
+    db.query(querySummary, [siswa_id], (err, summaryResult) => {
+        if (err) {
+            console.error("Gagal mengambil summary nilai siswa:", err);
+            return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+        }
+
+        db.query(queryRekap, [siswa_id], (err2, rekapResult) => {
+            if (err2) {
+                console.error("Gagal mengambil rekap nilai siswa:", err2);
+                return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+            }
+
+            res.json({
+                summary: summaryResult[0],
+                riwayat: rekapResult
+            });
+        });
+    });
+});
+
+// ---------- ANALITIK GURU: rekap nilai seluruh siswa per mapel/level ----------
+// GET /api/analitik/guru
+app.get('/api/analitik/guru', (req, res) => {
+    const queryPerMapel = `
+        SELECT mp.nama_mapel, ROUND(AVG(n.skor), 2) AS rata_rata, COUNT(*) AS jumlah_data
+        FROM nilai n
+        LEFT JOIN mata_pelajaran mp ON n.mapel_id = mp.id
+        GROUP BY n.mapel_id, mp.nama_mapel
+        ORDER BY rata_rata DESC
+    `;
+
+    const queryPerLevel = `
+        SELECT s.level_adaptif, ROUND(AVG(n.skor), 2) AS rata_rata, COUNT(*) AS jumlah_data
+        FROM nilai n
+        LEFT JOIN siswa s ON n.siswa_id = s.id
+        GROUP BY s.level_adaptif
+    `;
+
+    const queryPerSiswa = `
+        SELECT s.id AS siswa_id, u.nama_lengkap, s.level_adaptif,
+               ROUND(AVG(n.skor), 2) AS rata_rata, COUNT(n.id) AS jumlah_ujian
+        FROM siswa s
+        LEFT JOIN user u ON s.user_id = u.id
+        LEFT JOIN nilai n ON n.siswa_id = s.id
+        GROUP BY s.id, u.nama_lengkap, s.level_adaptif
+        ORDER BY rata_rata DESC
+    `;
+
+    db.query(queryPerMapel, (err, perMapel) => {
+        if (err) {
+            console.error("Gagal mengambil analitik per mapel:", err);
+            return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+        }
+
+        db.query(queryPerLevel, (err2, perLevel) => {
+            if (err2) {
+                console.error("Gagal mengambil analitik per level:", err2);
+                return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+            }
+
+            db.query(queryPerSiswa, (err3, perSiswa) => {
+                if (err3) {
+                    console.error("Gagal mengambil analitik per siswa:", err3);
+                    return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+                }
+
+                res.json({
+                    per_mapel: perMapel,
+                    per_level: perLevel,
+                    per_siswa: perSiswa
+                });
+            });
+        });
+    });
+});
+
+// ---------- ANALITIK WALI: rekap nilai anak tertentu (berdasarkan orang_tua) ----------
+// GET /api/analitik/wali/:user_id  (user_id = id user wali yang login)
+app.get('/api/analitik/wali/:user_id', (req, res) => {
+    const { user_id } = req.params;
+
+    // Cari siswa_id yang terhubung dengan orang tua ini
+    const queryAnak = `
+        SELECT ot.siswa_id, ot.nama_wali, u.nama_lengkap AS nama_siswa, s.level_adaptif
+        FROM orang_tua ot
+        LEFT JOIN siswa s ON ot.siswa_id = s.id
+        LEFT JOIN user u ON s.user_id = u.id
+        WHERE ot.user_id = ?
+    `;
+
+    db.query(queryAnak, [user_id], (err, anakResult) => {
+        if (err) {
+            console.error("Gagal mengambil data anak wali:", err);
+            return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+        }
+
+        if (anakResult.length === 0) {
+            return res.status(404).json({ error: true, message: 'Data anak untuk akun wali ini tidak ditemukan.' });
+        }
+
+        const siswaId = anakResult[0].siswa_id;
+
+        const querySummary = `
+            SELECT 
+                COUNT(*) AS total_ujian,
+                ROUND(AVG(skor), 2) AS rata_rata,
+                MAX(skor) AS skor_tertinggi,
+                MIN(skor) AS skor_terendah
+            FROM nilai
+            WHERE siswa_id = ?
+        `;
+
+        const queryRekap = `
+            SELECT n.id, n.jenis_ujian, n.skor, n.tanggal_kerja, mp.nama_mapel
+            FROM nilai n
+            LEFT JOIN mata_pelajaran mp ON n.mapel_id = mp.id
+            WHERE n.siswa_id = ?
+            ORDER BY n.tanggal_kerja DESC
+        `;
+
+        db.query(querySummary, [siswaId], (err2, summaryResult) => {
+            if (err2) {
+                console.error("Gagal mengambil summary nilai anak:", err2);
+                return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+            }
+
+            db.query(queryRekap, [siswaId], (err3, rekapResult) => {
+                if (err3) {
+                    console.error("Gagal mengambil rekap nilai anak:", err3);
+                    return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+                }
+
+                res.json({
+                    anak: anakResult[0],
+                    summary: summaryResult[0],
+                    riwayat: rekapResult
+                });
+            });
+        });
+    });
+});
+
+// ---------- ANALITIK KEPSEK: rekap menyeluruh sekolah ----------
+// GET /api/analitik/kepsek
+app.get('/api/analitik/kepsek', (req, res) => {
+    const querySummary = `
+        SELECT 
+            COUNT(DISTINCT siswa_id) AS total_siswa_aktif,
+            COUNT(*) AS total_data_nilai,
+            ROUND(AVG(skor), 2) AS rata_rata_sekolah,
+            MAX(skor) AS skor_tertinggi,
+            MIN(skor) AS skor_terendah
+        FROM nilai
+    `;
+
+    const queryPerMapel = `
+        SELECT mp.nama_mapel, ROUND(AVG(n.skor), 2) AS rata_rata, COUNT(*) AS jumlah_data
+        FROM nilai n
+        LEFT JOIN mata_pelajaran mp ON n.mapel_id = mp.id
+        GROUP BY n.mapel_id, mp.nama_mapel
+        ORDER BY rata_rata DESC
+    `;
+
+    const queryPerLevel = `
+        SELECT s.level_adaptif, ROUND(AVG(n.skor), 2) AS rata_rata, COUNT(*) AS jumlah_data
+        FROM nilai n
+        LEFT JOIN siswa s ON n.siswa_id = s.id
+        GROUP BY s.level_adaptif
+    `;
+
+    const queryPerJenisUjian = `
+        SELECT jenis_ujian, ROUND(AVG(skor), 2) AS rata_rata, COUNT(*) AS jumlah_data
+        FROM nilai
+        GROUP BY jenis_ujian
+    `;
+
+    db.query(querySummary, (err, summaryResult) => {
+        if (err) {
+            console.error("Gagal mengambil summary sekolah:", err);
+            return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+        }
+
+        db.query(queryPerMapel, (err2, perMapel) => {
+            if (err2) {
+                console.error("Gagal mengambil analitik per mapel:", err2);
+                return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+            }
+
+            db.query(queryPerLevel, (err3, perLevel) => {
+                if (err3) {
+                    console.error("Gagal mengambil analitik per level:", err3);
+                    return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+                }
+
+                db.query(queryPerJenisUjian, (err4, perJenis) => {
+                    if (err4) {
+                        console.error("Gagal mengambil analitik per jenis ujian:", err4);
+                        return res.status(500).json({ error: true, message: 'Terjadi kesalahan pada query database.' });
+                    }
+
+                    res.json({
+                        summary: summaryResult[0],
+                        per_mapel: perMapel,
+                        per_level: perLevel,
+                        per_jenis_ujian: perJenis
+                    });
+                });
+            });
+        });
+    });
 });
 app.listen(PORT, () => {
     console.log(`Server EduAdapt-API berjalan murni di port ${PORT}`);
