@@ -3,7 +3,6 @@ import mysql from 'mysql2';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-const cors = require('cors');
 
 dotenv.config();
 
