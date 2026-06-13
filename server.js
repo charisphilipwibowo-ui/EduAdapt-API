@@ -3,10 +3,14 @@ import mysql from 'mysql2';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+const cors = require('cors');
+
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: 'https://edu-adapt-8ewa-bhotyblhb-charisphilipwibowo-uis-projects.vercel.app'
+}));
 app.use(express.json());
 
 const db = mysql.createConnection({
