@@ -520,7 +520,9 @@ app.get('/api/analitik/kepsek', (req, res) => {
     });
 });
 
-module.exports = app;
+// module.exports = app;
+
+export default app;
 
 // app.listen(PORT, () => {
 //     console.log(`Server EduAdapt-API berjalan murni di port ${PORT}`);
