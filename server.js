@@ -3,7 +3,6 @@ import mysql from 'mysql2';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-
 dotenv.config();
 
 const app = express();
@@ -520,6 +519,9 @@ app.get('/api/analitik/kepsek', (req, res) => {
         });
     });
 });
-app.listen(PORT, () => {
-    console.log(`Server EduAdapt-API berjalan murni di port ${PORT}`);
-});
+
+module.exports = app;
+
+// app.listen(PORT, () => {
+//     console.log(`Server EduAdapt-API berjalan murni di port ${PORT}`);
+// });
